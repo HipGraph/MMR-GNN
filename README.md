@@ -5,15 +5,15 @@ Majeske, Nicholas, and Ariful Azad. "Multi-modal Recurrent Graph Neural Networks
 
 ## Multi-Modal Recurrent Graph Neural Network
 
-|![Figure1](./MMR-GNN.pdf)|
+|![Figure1](./MMR-GNN.png)|
 |:--:| 
 | *Figure 1. Encoder-decoder architecture of MMR-GNN* |
 
-|![Figure2](./GraphAugr.pdf)|
+|![Figure2](./GraphAugr.png)|
 |:--:| 
 | *Figure 2. Graph Augmentation Layer (GraphAugr)* |
 
-|![Figure3](./stGRU.pdf)|
+|![Figure3](./stGRU.png)|
 |:--:| 
 | *Figure 3. Spatiotemporal Gated Recurrent Unit (stGRU)* |
 
