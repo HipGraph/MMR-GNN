@@ -7,7 +7,7 @@ Majeske, Nicholas, and Ariful Azad. "Multi-modal Recurrent Graph Neural Networks
 
 |![Figure1](./MMR-GNN.png)|
 |:--:| 
-| *Figure 1. Encoder-decoder architecture of MMR-GNN* |
+| *Figure 1. Encoder-Decoder Architecture of MMR-GNN* |
 
 |![Figure2](./GraphAugr.png)|
 |:--:| 
