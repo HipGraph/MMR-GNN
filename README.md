@@ -18,6 +18,10 @@ Majeske, Nicholas, and Ariful Azad. "Multi-modal Recurrent Graph Neural Networks
 | *Figure 3. Spatiotemporal Gated Recurrent Unit (stGRU)* |
 
 
+## Primary Results
+![image](./MainResults.png)
+
+
 ## Experiments
 
 This repository contains only MMR-GNN implemented in PyTorch. For all experimental design/implementation including datasets, baseline models, and ablation studies, please refer to [[MMR-GNN Dev](https://github.com/HipGraph/MMR-GNN_Dev)] .

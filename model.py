@@ -68,6 +68,10 @@ def make_msg_block(msg, block_char="#"):
     return msg_block
 
 
+def get_device(use_gpu):
+    return torch.device("cuda" if torch.cuda.is_available() and use_gpu else "cpu")
+
+
 def unravel_index(indices, shape):
     """Converts flat indices into unraveled coordinates in a target shape. This is a `torch` implementation of `numpy.unravel_index`.
     
@@ -729,7 +733,6 @@ class RNNCell(torch.nn.Module):
             autoregress = True
         outputs = {}
         get_idx_fn = self.index_select
-#        get_idx_fn = self.transpose_select
         A = [None] * n_steps
         a = get_idx_fn(x, 0, temporal_dim)
         xt_t = None
@@ -798,24 +801,21 @@ class RNNCell(torch.nn.Module):
                 cell.reset_parameters()
 
 
-class GraphAugr(torch.nn.Module):
+class GraphConstructor(torch.nn.Module):
 
     debug = 0
 
-    def __init__(self, graph_construction_method=["top-k", "Minkowski-2", 1.0], exog_alpha=0.5, cache_exog=True):
-        super(GraphAugr, self).__init__()
+    def __init__(self, graph_construction_method=["top-k", "Minkowski-2", 1.0]):
+        super(GraphConstructor, self).__init__()
         if graph_construction_method is None:
             pass
         elif graph_construction_method[0] == "random":
             graph_construction_method.insert(None, 1)
         self.method = graph_construction_method
-        self.exog_alpha = exog_alpha
-        self.cache_exog = cache_exog
 
     def forward(self, **inputs):
-#        self.debug = 1
         if self.debug:
-            print(make_msg_block("GraphAugr Forward"))
+            print(make_msg_block("GraphConstruction Forward"))
         outputs = {}
         if not self.method is None:
             sims = self.compute_similarities(**inputs)["sims"]
@@ -1050,6 +1050,115 @@ class GraphAugr(torch.nn.Module):
         pass
 
 
+class GraphAugr(torch.nn.Module):
+
+    debug = 0
+
+    def __init__(self, n_nodes, gc_kwargs={}):
+        super(GraphAugr, self).__init__()
+        # Init
+        self.gc = GraphConstructor(**gc_kwargs)
+        self.augment = False
+        if not self.gc.method is None:
+            if self.gc.method[0] == "threshold" or self.gc.method[-1] > 0:
+                self.augment = True
+        # Save vars
+        self.n_nodes = n_nodes
+        self.gc_method = self.gc.method
+
+    def forward(self, **inputs):
+        self.gc.debug = self.debug
+        edge_index, edge_weight = inputs.get("edge_index", None), inputs.get("edge_weight", None)
+        if self.debug:
+            print(make_msg_block("GraphAugr Forward"))
+        outputs = {}
+        if self.augment: # perform augmentation
+            if self.debug:
+                print(make_msg_block("Augmenting Edges", "-"))
+            # Call the GraphConstructor
+            gc_outputs = self.gc(**inputs)
+            added_edge_index, added_edge_weight = gc_outputs["edge_index"], gc_outputs["edge_weight"]
+            if "reduce_dim" in inputs:
+                added_edge_index = torch.unsqueeze(added_edge_index, inputs["reduce_dim"])
+                added_edge_weight = torch.unsqueeze(added_edge_weight, inputs["reduce_dim"])
+            outputs["added_edge_index"] = added_edge_index
+            outputs["added_edge_weight"] = added_edge_weight
+            # Augment the edges
+            if edge_index is None: # no existing edges - simply use constructed edges
+                aug_edge_index, aug_edge_weight = added_edge_index, added_edge_weight
+                W = gc_outputs.get("W", None)
+            else: # existing edges - concatentate constructed edges to them
+                aug_edge_index, aug_edge_weight = self.augment_edges(
+                    edge_index, added_edge_index, edge_weight, added_edge_weight
+                )
+                W = torch.zeros((self.n_nodes, self.n_nodes), device=get_device(True))
+                if edge_weight is None:
+                    W[aug_edge_index[1],aug_edge_index[0]] = 1
+                else:
+                    W[aug_edge_index[1],aug_edge_index[0]] = aug_edge_weight
+            if self.debug:
+                print("aug_edge_index =", aug_edge_index.shape)
+                if self.debug > 1:
+                    print(aug_edge_index)
+            if self.debug:
+                print("aug_edge_weight =", aug_edge_weight.shape)
+                if self.debug > 1:
+                    print(aug_edge_weight)
+        else: # DO NOT perform augmentation - simply return existing (or non-existing) edges/weights
+            if self.debug:
+                print(make_msg_block("No Augmentation", "-"))
+            aug_edge_index, aug_edge_weight = edge_index, edge_weight
+            W = torch.zeros((self.n_nodes, self.n_nodes), device=get_device(True))
+            if not edge_index is None:
+                if edge_weight is None:
+                    W[edge_index[1],edge_index[0]] = 1
+                else:
+                    W[edge_index[1],edge_index[0]] = edge_weight
+        return {"edge_index": aug_edge_index, "edge_weight": aug_edge_weight, "W": W}
+
+    def augment_edges(self, orig_edge_index, added_edge_index, orig_edge_weight=None, added_edge_weight=None):
+        if orig_edge_index is None:
+            return added_edge_index, added_edge_weight
+        if self.debug:
+            print("orig_edge_index =", orig_edge_index.shape)
+            if self.debug > 1:
+                print(orig_edge_index)
+        if self.debug:
+            print("added_edge_index =", added_edge_index.shape)
+            if self.debug > 1:
+                print(added_edge_index)
+        edge_index = maybe_expand_then_cat((orig_edge_index, added_edge_index), -1)
+        if not (orig_edge_weight is None or added_edge_weight is None):
+            if 0:
+                print("orig_edge_weight =", orig_edge_weight.shape)
+                print(orig_edge_weight)
+                print("added_edge_weight =", added_edge_weight.shape)
+                print(added_edge_weight)
+            edge_weight = maybe_expand_then_cat((orig_edge_weight, added_edge_weight), -1)
+        else:
+            edge_weight = None
+        if 0:
+            print("edge_index =", edge_index.shape)
+            print(edge_index)
+            if not edge_weight is None:
+                print("edge_weight =", edge_weight.shape)
+                print(edge_weight)
+        if self.debug:
+            print("Adapted Edge Index =", edge_index.shape)
+            print(memory_of(edge_index))
+            if self.debug > 1:
+                print(edge_index)
+        if self.debug and not edge_weight is None:
+            print("Adapted Edge Weight =", edge_weight.shape)
+            print(memory_of(edge_weight))
+            if self.debug > 1:
+                print(edge_weight)
+        return edge_index, edge_weight
+
+    def reset_parameters(self):
+        self.gc.reset_parameters()
+
+
 class TemporalMapper(torch.nn.Module):
 
     def __init__(self, in_size, out_size, temporal_mapper="last", temporal_mapper_kwargs={}):
@@ -1178,7 +1287,7 @@ class MMRGNN(torch.nn.Module):
         if embed_size > 0:
             self.node_embs = torch.nn.Parameter(torch.randn(N, embed_size), requires_grad=True)
         #   Graph Augmenation Layer
-        self.ga = GraphAugr(**augr_kwargs)
+        self.ga = GraphAugr(N, augr_kwargs)
         #   Encoding layer
         self.enc = RNNCell(Fst, H, **enc_kwargs)
         #   Temporal mapping layer (T_in->?)
@@ -1223,7 +1332,6 @@ class MMRGNN(torch.nn.Module):
         self.out_layer = out_layer
 
     def forward(self, **inputs):
-#        self.debug = 1
         self.ga.debug = self.debug
         self.enc.debug = self.debug
         self.tmp_map.debug = self.debug
