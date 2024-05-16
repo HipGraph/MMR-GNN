@@ -9,13 +9,9 @@ Majeske, Nicholas, and Ariful Azad. "Multi-modal Recurrent Graph Neural Networks
 |:--:| 
 | *Figure 1. Encoder-Decoder Architecture of MMR-GNN* |
 
-|![Figure2](./GraphAugr.png)|
-|:--:| 
-| *Figure 2. Graph Augmentation Layer (GraphAugr)* |
-
-|![Figure3](./stGRU.png)|
-|:--:| 
-| *Figure 3. Spatiotemporal Gated Recurrent Unit (stGRU)* |
+|![Figure2](./GraphAugr.png) | ![Figure3](./stGRU.png)|
+|:--:|:--:|
+| *Figure 2. Graph Augmentation Layer (GraphAugr)* | *Figure 3. Spatiotemporal Gated Recurrent Unit (stGRU)* |
 
 
 ## Primary Results
