@@ -6,132 +6,7 @@ import os
 import sys
 import math
 
-
-comparator_fn_map = {
-    "lt": lambda a, b: a < b,
-    "le": lambda a, b: a <= b,
-    "eq": lambda a, b: a == b,
-    "ne": lambda a, b: a != b, 
-    "gt": lambda a, b: a > b,
-    "ge": lambda a, b: a >= b, 
-    "<": lambda a, b: a < b,
-    "<=": lambda a, b: a <= b,
-    "==": lambda a, b: a == b,
-    "!=": lambda a, b: a != b, 
-    ">": lambda a, b: a > b,
-    ">=": lambda a, b: a >= b, 
-}
-
-
-def copy_dict(a):
-    return {key: value for key, value in a.items()}
-
-
-def merge_dicts(a, b, overwrite=True):
-    if not (isinstance(a, dict) or isinstance(b, dict)):
-        raise ValueError("Expected two dictionaries")
-    if overwrite:
-        return {**a, **b}
-    c = copy_dict(a)
-    for key, value in b.items():
-        if not key in a:
-            c[key] = value
-    return c
-
-
-def format_memory(n_bytes):
-    if n_bytes == 0:
-        return "0B"
-    mem_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
-    i = int(math.floor(math.log(n_bytes, 1024)))
-    p = math.pow(1024, i)
-    s = int(round(n_bytes / p, 2))
-    return "%s%s" % (s, mem_name[i])
-
-
-def memory_of(item):
-    if isinstance(item, torch.Tensor):
-        n_bytes = item.element_size() * item.nelement()
-    else:
-        n_bytes = sys.getsizeof(item)
-    return format_memory(n_bytes)
-
-
-def make_msg_block(msg, block_char="#"):
-    msg_line = 3*block_char + " " + msg + " " + 3*block_char
-    msg_line_len = len(msg_line)
-    msg_block = "%s\n%s\n%s" % (
-        msg_line_len*block_char,
-        msg_line,
-        msg_line_len*block_char
-    )
-    return msg_block
-
-
-def get_device(use_gpu):
-    return torch.device("cuda" if torch.cuda.is_available() and use_gpu else "cpu")
-
-
-def unravel_index(indices, shape):
-    """Converts flat indices into unraveled coordinates in a target shape. This is a `torch` implementation of `numpy.unravel_index`.
-    
-    Arguments
-    ---------
-    indices : LongTensor with shape=(?, N)
-    shape : tuple with shape=(D,)
-
-    Returns
-    -------
-    coord : LongTensor with shape=(?, N, D)
-
-    Source
-    ------
-    author : francois-rozet @ https://github.com/pytorch/pytorch/issues/35674#issuecomment-739492875
-
-    """
-    shape = torch.tensor(shape)
-    indices = indices % shape.prod()  # prevent out-of-bounds indices
-    coord = torch.zeros(indices.size() + shape.size(), dtype=indices.dtype, device=indices.device)
-    for i, dim in enumerate(reversed(shape)):
-        coord[..., i] = indices % dim
-        indices = torch.div(indices, dim, rounding_mode="trunc")
-        return coord.flip(-1)
-
-
-def align_dims(x, y, x_dim, y_dim):
-    if len(x.shape) > len(y.shape):
-        raise ValueError(
-            "Input x must have fewer dimensions than y to be aligned. Received x.shape=%s and y.shape=%s" % (
-                x.shape, y.shape
-            )
-        )
-    elif len(x.shape) == len(y.shape):
-        return x
-    if x_dim < 0:
-        x_dim = len(x.shape) + x_dim
-    if y_dim < 0:
-        y_dim = len(y.shape) + y_dim
-    new_shape = [1 for _ in y.shape]
-    start = y_dim - x_dim
-    end = start + len(x.shape)
-    new_shape[start:end] = x.shape
-    return x.view(new_shape)
-
-
-def align(inputs, dims):
-    if not isinstance(inputs, (tuple, list)) or not all([isinstance(inp, torch.Tensor) for inp in inputs]):
-        raise ValueError("Argumet inputs must be tuple or list of tensors")
-    if len(inputs) < 2:
-        return inputs
-    if isinstance(dims, int):
-        dims = tuple(dims for inp in inputs)
-    elif not isinstance(dim, tuple):
-        raise ValueError("Argument dim must be int or tuple of ints")
-    input_dims = [inp.dim() for inp in inputs]
-    idx = input_dims.index(max(input_dims))
-    y = inputs[idx]
-    y_dim = dims[idx]
-    return [align_dims(inp, y, dim, y_dim) for inp, dim in zip(inputs, dims)]
+import util
 
 
 class __Linear__(torch.nn.Module):
@@ -236,7 +111,7 @@ class kmLinear(__Linear__):
         # w.shape=(K, |V|, O, I)
         # b.shape=(|V|, O)
         if self.debug:
-            print(make_msg_block("kmLinear Forward"))
+            print(util.msg_block("kmLinear Forward"))
             print("x =", x.shape)
             print("w =", w.shape)
             if not b is None:
@@ -383,7 +258,7 @@ class gcLinear(torch_geometric.nn.conv.MessagePassing):
 
     def forward(self, x, edge_index, edge_weight=None, frmt="?", **kwargs):
         if self.debug:
-            print(make_msg_block("gcLinear Forward"))
+            print(util.msg_block("gcLinear Forward"))
             print("x =", x.shape)
             if not edge_index is None:
                 print("edge_index =", edge_index.shape)
@@ -413,7 +288,7 @@ class gcLinear(torch_geometric.nn.conv.MessagePassing):
             x = self.layer_forward(self.lin_o, x, **kwargs)
         #    Apply linear layer after graph conv
         if self.debug:
-            print(make_msg_block("gcLinear Output"))
+            print(util.msg_block("gcLinear Output"))
             print("x =", x.shape)
         #   Cleanup
         x, edge_index, edge_weight = self.forward_hook(x, edge_index, edge_weight, **kwargs)
@@ -441,7 +316,7 @@ class gcLinear(torch_geometric.nn.conv.MessagePassing):
     def std_conv(self, x, edge_index, edge_weight, frmt, **kwargs):
         if not edge_index is None:
             if frmt == "coo":
-                x, edge_index = align((x, edge_index), -1)
+                x, edge_index = util.align((x, edge_index), -1)
                 for i in range(self.n_hops):
                     x = self.propagate(edge_index, x=x, edge_weight=edge_weight, size=None)
                 x = torch.squeeze(x, 0)
@@ -528,7 +403,8 @@ class stGRUCell(torch.nn.Module):
 
     def __init__(self, in_size, out_size, xs_size=0, xt_size=0, conv="std", layer="Linear", bias=True, order=1, n_hops=1, shared=True, **kwargs):
         super(stGRUCell, self).__init__()
-        print("stGRUCell :", in_size, out_size, xs_size, xt_size, layer, bias, order, n_hops, shared, kwargs)
+        if self.debug:
+            print("stGRUCell :", in_size, out_size, xs_size, xt_size, layer, bias, order, n_hops, shared, kwargs)
         # Layers
         if shared:
             self.lin_rz = gcLinear(
@@ -680,7 +556,8 @@ class RNNCell(torch.nn.Module):
 
     def __init__(self, in_size, out_size, n_rnn_layers=1, rnn_layer="LSTM", rnn_kwargs={}, dropout=0.0):
         super(RNNCell, self).__init__()
-        print("RNNCell :", in_size, out_size, n_rnn_layers, rnn_layer, rnn_kwargs, dropout)
+        if self.debug:
+            print("RNNCell :", in_size, out_size, n_rnn_layers, rnn_layer, rnn_kwargs, dropout)
         # Instantiate model layers
         def init_cell(in_size, out_size, rnn_layer, **rnn_kwargs):
             cell = {
@@ -713,18 +590,18 @@ class RNNCell(torch.nn.Module):
         temporal_dim = inputs.get("temporal_dim", -2)
         init_state, n_steps = inputs.get("init_state", None), inputs.get("n_steps", x.shape[temporal_dim])
         if self.debug:
-            print(make_msg_block("RNN Forward"))
+            print(util.msg_block("RNN Forward"))
         if self.debug:
             print("x =", x.shape)
-            print(memory_of(x))
+            print(util.memory_of(x))
             if self.debug > 1:
                 print(x)
             if not xs is None:
                 print("xs =", xs.shape)
-                print(memory_of(xs))
+                print(util.memory_of(xs))
             if not xt is None:
                 print("xt =", xt.shape)
-                print(memory_of(xt))
+                print(util.memory_of(xt))
         autoregress = False
         if n_steps != x.shape[temporal_dim]: # encode autoregressively
             assert x.shape[temporal_dim] == 1, "Encoding a sequence from %d to %d time-steps is ambiguous" % (
@@ -742,11 +619,11 @@ class RNNCell(torch.nn.Module):
                 x_t = (a if autoregress else get_idx_fn(x, t, temporal_dim))
                 if not xt is None:
                     xt_t = get_idx_fn(xt, t, temporal_dim)
-                inputs_t = merge_dicts(inputs, {"x": x_t, "xt": xt_t, "prev_state": prev_state})
+                inputs_t = util.merge_dicts(inputs, {"x": x_t, "xt": xt_t, "prev_state": prev_state})
                 a, prev_state = self.cell_forward(self.cells[i], **inputs_t)
                 if self.debug:
                     print("Step-%d Embedding =" % (t+1), a.shape)
-                    print(memory_of(a))
+                    print(util.memory_of(a))
                 A[t] = a
             a = torch.stack(A, temporal_dim)
             a = self.drops[i](a)
@@ -772,7 +649,7 @@ class RNNCell(torch.nn.Module):
         xs, xt = inputs.get("xs", None), inputs.get("xt", None)
         edge_index, edge_weight = inputs.get("edge_index", None), inputs.get("edge_weight", None)
         if self.debug:
-            print(make_msg_block("stGRUCell Forward"))
+            print(util.msg_block("stGRUCell Forward"))
             print("x =", x.shape)
             if not xs is None:
                 print("xs =", xs.shape)
@@ -815,22 +692,22 @@ class GraphConstructor(torch.nn.Module):
 
     def forward(self, **inputs):
         if self.debug:
-            print(make_msg_block("GraphConstruction Forward"))
+            print(util.msg_block("GraphConstruction Forward"))
         outputs = {}
         if not self.method is None:
             sims = self.compute_similarities(**inputs)["sims"]
-            _inputs = merge_dicts(inputs, {"sims": sims})
+            _inputs = util.merge_dicts(inputs, {"sims": sims})
             outputs = self.sims_to_edges(**_inputs)
         return outputs
 
     def _compute_similarities(self, A, B):
         if self.debug:
             print("A =", A.shape)
-            print(memory_of(A))
+            print(util.memory_of(A))
             if self.debug > 1:
                 print(A)
             print("B =", B.shape)
-            print(memory_of(B))
+            print(util.memory_of(B))
             if self.debug > 1:
                 print(B)
         # Handle args
@@ -898,10 +775,10 @@ class GraphConstructor(torch.nn.Module):
             sims.append(sim)
             if self.debug:
                 print("Similarity =", sim.shape)
-                print(memory_of(sim))
+                print(util.memory_of(sim))
                 if self.debug > 1:
                     print(sim)
-        sims = align(sims, -1)
+        sims = util.align(sims, -1)
         for i in range(len(sims)):
             sims[i] = agg_weight[i] * sims[i]
         sim = agg_fn(sims)
@@ -911,7 +788,7 @@ class GraphConstructor(torch.nn.Module):
             sim = sim + b
         if self.debug:
             print("Similarity =", sim.shape)
-            print(memory_of(sim))
+            print(util.memory_of(sim))
             if self.debug > 1:
                 print(sim)
         outputs["sims"] = sim
@@ -925,7 +802,7 @@ class GraphConstructor(torch.nn.Module):
             if isinstance(k, float):
                 k = int(k * n_spatial**2 + 0.5)
             values, indices = torch.topk(torch.reshape(sims, sims.shape[:-2] + (-1,)), k)
-            edge_index = torch.transpose(unravel_index(indices, sims.shape[-2:]), -2, -1)
+            edge_index = torch.transpose(util.unravel_index(indices, sims.shape[-2:]), -2, -1)
             edge_weight = values
         elif self.method[0] == "k-nn":
             n_spatial, n_spatial = sims.shape[-2:]
@@ -941,8 +818,8 @@ class GraphConstructor(torch.nn.Module):
             )
             edge_weight = torch.reshape(values, sims.shape[:-2] + (-1,))
         elif self.method[0] == "threshold":
-            comparator, threshold = self.method[-2:]
-            indices = torch.where(comparator_fn_map[comparator](sims, threshold))
+            util.comparator, threshold = self.method[-2:]
+            indices = torch.where(util.comparator_fn_map[util.comparator](sims, threshold))
             edge_index = torch.stack(indices, 0)
             edge_weight = sims[indices]
         elif self.method[0] == "range":
@@ -977,7 +854,7 @@ class GraphConstructor(torch.nn.Module):
                 orig_edge_weight = sims[orig_edge_index[0],orig_edge_index[1]]
                 if self.debug:
                     print("Original Edge Weight =", orig_edge_weight.shape)
-                    print(memory_of(orig_edge_weight))
+                    print(util.memory_of(orig_edge_weight))
                     if self.debug > 1:
                         print(orig_edge_weight)
             if ignore_self_loops:
@@ -993,7 +870,7 @@ class GraphConstructor(torch.nn.Module):
                 outputs["orig_edge_weight"] = orig_edge_weight
                 if self.debug:
                     print("Original Edge Weight =", orig_edge_weight.shape)
-                    print(memory_of(orig_edge_weight))
+                    print(util.memory_of(orig_edge_weight))
                     if self.debug > 1:
                         print(orig_edge_weight)
             if ignore_self_loops:
@@ -1010,7 +887,7 @@ class GraphConstructor(torch.nn.Module):
                 outputs["orig_edge_weight"] = orig_edge_weight
                 if self.debug:
                     print("Original Edge Weight =", orig_edge_weight.shape)
-                    print(memory_of(orig_edge_weight))
+                    print(util.memory_of(orig_edge_weight))
                     if self.debug > 1:
                         print(orig_edge_weight)
             if ignore_self_loops:
@@ -1021,19 +898,21 @@ class GraphConstructor(torch.nn.Module):
             edge_index, edge_weight, W = self._sims_to_edges(sims)
         if not prune is None:
             if prune[0] == "weight":
-                comparator, value = prune[1:]
-                keep = torch.where(torch.logical_not(comparator_fn_map[comparator](edge_weight, value)))
+                util.comparator, value = prune[1:]
+                keep = torch.where(
+                    torch.logical_not(util.comparator_fn_map[util.comparator](edge_weight, value))
+                )
                 edge_index = torch.index_select(edge_index, -1, keep[0])
                 edge_weight = torch.index_select(edge_weight, -1, keep[0])
             else:
                 raise NotImplementedError(prune)
         if self.debug:
             print("Edge Index =", edge_index.shape)
-            print(memory_of(edge_index))
+            print(util.memory_of(edge_index))
             if self.debug > 1:
                 print(edge_index)
             print("Edge Weight =", edge_weight.shape)
-            print(memory_of(edge_weight))
+            print(util.memory_of(edge_weight))
             if self.debug > 1:
                 print(edge_weight)
             if not W is None:
@@ -1070,11 +949,11 @@ class GraphAugr(torch.nn.Module):
         self.gc.debug = self.debug
         edge_index, edge_weight = inputs.get("edge_index", None), inputs.get("edge_weight", None)
         if self.debug:
-            print(make_msg_block("GraphAugr Forward"))
+            print(util.msg_block("GraphAugr Forward"))
         outputs = {}
         if self.augment: # perform augmentation
             if self.debug:
-                print(make_msg_block("Augmenting Edges", "-"))
+                print(util.msg_block("Augmenting Edges", "-"))
             # Call the GraphConstructor
             gc_outputs = self.gc(**inputs)
             added_edge_index, added_edge_weight = gc_outputs["edge_index"], gc_outputs["edge_weight"]
@@ -1106,7 +985,7 @@ class GraphAugr(torch.nn.Module):
                     print(aug_edge_weight)
         else: # DO NOT perform augmentation - simply return existing (or non-existing) edges/weights
             if self.debug:
-                print(make_msg_block("No Augmentation", "-"))
+                print(util.msg_block("No Augmentation", "-"))
             aug_edge_index, aug_edge_weight = edge_index, edge_weight
             W = torch.zeros((self.n_nodes, self.n_nodes), device=get_device(True))
             if not edge_index is None:
@@ -1145,12 +1024,12 @@ class GraphAugr(torch.nn.Module):
                 print(edge_weight)
         if self.debug:
             print("Adapted Edge Index =", edge_index.shape)
-            print(memory_of(edge_index))
+            print(util.memory_of(edge_index))
             if self.debug > 1:
                 print(edge_index)
         if self.debug and not edge_weight is None:
             print("Adapted Edge Weight =", edge_weight.shape)
-            print(memory_of(edge_weight))
+            print(util.memory_of(edge_weight))
             if self.debug > 1:
                 print(edge_weight)
         return edge_index, edge_weight
@@ -1183,7 +1062,7 @@ class TemporalMapper(torch.nn.Module):
         pass
 
     def attention_init(self, in_size, out_size, kwargs={}):
-        attention_kwargs = merge_dicts(
+        attention_kwargs = util.merge_dicts(
             {"num_heads": 1, "dropout": 0.0, "kdim": in_size, "vdim": in_size},
             kwargs
         )
@@ -1191,12 +1070,12 @@ class TemporalMapper(torch.nn.Module):
 
     def forward(self, **inputs):
         if self.debug:
-            print(make_msg_block("TemporalMapper Forward"))
+            print(util.msg_block("TemporalMapper Forward"))
         return self.mapper(**inputs)
 
     def last_mapper(self, **inputs):
         if self.debug:
-            print(make_msg_block("last_mapper() forward"))
+            print(util.msg_block("last_mapper() forward"))
         x, temporal_dim = inputs["x"], inputs.get("temporal_dim", -2)
         if self.debug:
             print("x =", x.shape)
@@ -1264,22 +1143,23 @@ class MMRGNN(torch.nn.Module):
         out_layer="mLinear", 
     ):
         super(MMRGNN, self).__init__()
-        print(
-            "MMR-GNN :", 
-            Fs, 
-            Ft, 
-            Fst, 
-            N, 
-            Fst_out, 
-            embed_size, 
-            M, 
-            H, 
-            augr_kwargs, 
-            enc_kwargs, 
-            mapper_kwargs, 
-            dec_kwargs, 
-            out_layer, 
-        )
+        if self.debug:
+            print(
+                "MMR-GNN :", 
+                Fs, 
+                Ft, 
+                Fst, 
+                N, 
+                Fst_out, 
+                embed_size, 
+                M, 
+                H, 
+                augr_kwargs, 
+                enc_kwargs, 
+                mapper_kwargs, 
+                dec_kwargs, 
+                out_layer, 
+            )
         # Instantiate model layers
         if embed_size < 0:
             raise ValueError(embed_size)
@@ -1343,35 +1223,35 @@ class MMRGNN(torch.nn.Module):
         modality_index = inputs.get("modality_index", None)
         T = inputs["T"]
         if self.debug:
-            print(make_msg_block("MMR-GNN Forward"))
+            print(util.msg_block("MMR-GNN Forward"))
         if self.debug and not xs is None:
             print("xs =", xs.shape)
-            print(memory_of(xs))
+            print(util.memory_of(xs))
             if self.debug > 1:
                 print(xs)
         if self.debug and not xt is None:
             print("xt =", xt.shape)
-            print(memory_of(xt))
+            print(util.memory_of(xt))
             if self.debug > 1:
                 print(xt)
         if self.debug:
             print("xst =", xst.shape)
-            print(memory_of(xst))
+            print(util.memory_of(xst))
             if self.debug > 1:
                 print(xst)
         if self.debug and not edge_index is None:
             print("edge_index =", edge_index.shape)
-            print(memory_of(edge_index))
+            print(util.memory_of(edge_index))
             if self.debug > 1:
                 print(edge_index)
         if self.debug and not edge_weight is None:
             print("edge_weight =", edge_weight.shape)
-            print(memory_of(edge_weight))
+            print(util.memory_of(edge_weight))
             if self.debug > 1:
                 print(edge_weight)
         if self.debug and not modality_index is None:
             print("modality_index =", modality_index.shape)
-            print(memory_of(modality_index))
+            print(util.memory_of(modality_index))
             if self.debug > 1:
                 print(modality_index)
         # START
@@ -1442,6 +1322,10 @@ class MMRGNN(torch.nn.Module):
         return outputs
 
     def reset_parameters(self):
-        for name, parameter in self.named_parameters():
-            print(name, parameter.shape)
-            torch.nn.init.xavier_uniform_(parameter)
+        for name, param in self.named_parameters():
+            if self.debug:
+                print(name, param.shape)
+            if param.dim() > 1:
+                torch.nn.init.xavier_uniform_(param)
+            else:
+                torch.nn.init.uniform_(param)
